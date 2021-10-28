@@ -1,0 +1,103 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "http"
+  ],
+  "swagger": "2.0",
+  "info": {
+    "description": "This is a sample recipes API. You can find out more about\nthe API at https://github.com/ajaix734/gin_go_api",
+    "title": "RECIPES API",
+    "version": "1.0.0"
+  },
+  "host": "localhost:3000",
+  "basePath": "/",
+  "paths": {
+    "/recipes": {
+      "get": {
+        "description": "successful operation",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "ListRecipesHandler"
+      },
+      "post": {
+        "description": "Create a recipe",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "NewRecipeHandler"
+      }
+    },
+    "/recipes/search": {
+      "get": {
+        "description": "Delete an existing recipe",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "SearchRecipeHandler",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "tag keyword to search for",
+            "name": "tag",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/recipes/{id}": {
+      "put": {
+        "description": "Invalid recipe ID",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "UpdateRecipeHandler",
+        "parameters": [
+          {
+            "name": "id"
+          }
+        ]
+      },
+      "delete": {
+        "description": "Delete an existing recipe",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "DeleteRecipeHandler",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "ID of the recipe",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    }
+  }
+}
