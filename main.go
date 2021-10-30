@@ -17,19 +17,23 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/xid"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type Recipe struct {
-	ID           string    `json:"id"`
+	ID string `json:"id"`
+	// _ID          primitive.ObjectID `bson:"_id" json:"id,omitempty"`
 	Name         string    `json:"name"`
 	Tags         []string  `json:"tags"`
 	Ingredients  []string  `json:"ingredients"`
@@ -37,12 +41,43 @@ type Recipe struct {
 	PublishedAt  time.Time `json:"publishedAt"`
 }
 
+var ctx context.Context
+var err error
+var client *mongo.Client
+
 var recipes []Recipe
 
 func init() {
 	recipes = make([]Recipe, 0)
 	file, _ := ioutil.ReadFile("recipes.json")
 	_ = json.Unmarshal([]byte(file), &recipes)
+
+	ctx := context.Background()
+	clientOpts := options.Client().ApplyURI("mongodb://admin:password@localhost:27017/recipes")
+	client, err = mongo.Connect(ctx, clientOpts)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Connected to MongoDB")
+
+	var listOfRecipes []interface{}
+	for _, recipe := range recipes {
+		listOfRecipes = append(listOfRecipes, recipe)
+	}
+	collection := client.Database("recipes").Collection("recipes")
+	estCount, estCountErr := collection.EstimatedDocumentCount(context.TODO())
+	if estCountErr != nil {
+		panic(estCountErr)
+	}
+	if estCount == 0 {
+		insertManyResult, err := collection.InsertMany(
+			ctx, listOfRecipes)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("Inserted recipes: ",
+			len(insertManyResult.InsertedIDs))
+	}
 }
 
 // swagger:operation POST /recipes recipes NewRecipeHandler
@@ -67,10 +102,17 @@ func NewRecipeHandler(c *gin.Context) {
 			"error": err.Error(),
 		})
 	}
-	recipe.ID = xid.New().String()
+	collection := client.Database("recipes").Collection("recipes")
 	recipe.PublishedAt = time.Now()
-	recipes = append(recipes, recipe)
-	c.JSON(http.StatusOK, recipe)
+	_, mongoErr := collection.InsertOne(context.TODO(), recipe)
+	if mongoErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": mongoErr.Error(),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Recipe inserted",
+	})
 }
 
 //swagger:operation GET /recipes recipes ListRecipesHandler
@@ -82,7 +124,23 @@ func NewRecipeHandler(c *gin.Context) {
 // '200':
 // description: successful operation
 func ListRecipesHandler(c *gin.Context) {
-	c.JSON(200, recipes)
+	ctx := context.Background()
+	collection := client.Database("recipes").Collection("recipes")
+	curr, err := collection.Find(ctx, bson.M{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+	}
+	defer curr.Close(ctx)
+
+	recipes := make([]Recipe, 0)
+	for curr.Next(ctx) {
+		var recipe Recipe
+		curr.Decode(&recipe)
+		recipes = append(recipes, recipe)
+	}
+	c.JSON(http.StatusOK, recipes)
 }
 
 // swagger:operation PUT /recipes/{id} recipes UpdateRecipeHandler
@@ -113,25 +171,33 @@ func UpdateRecipeHandler(c *gin.Context) {
 		})
 		return
 	}
-	index := -1
-	for i := 0; i < len(recipes); i++ {
-		if recipes[i].ID == id {
-			index = i
-		}
-	}
-
-	if index == -1 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Recipe not found",
-		})
-		return
-	}
-
+	ctx := context.Background()
+	collection := client.Database("recipes").Collection("recipes")
+	filter := bson.M{"id": id}
 	recipe.ID = id
 	recipe.PublishedAt = time.Now()
+	update := bson.M{
+		"$set": recipe,
+	}
+	upsert := true
+	after := options.After
+	opt := options.FindOneAndUpdateOptions{
+		ReturnDocument: &after,
+		Upsert:         &upsert,
+	}
+	result := collection.FindOneAndUpdate(ctx, filter, update, &opt)
+	if result.Err() != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": result.Err().Error(),
+		})
+	}
 
-	recipes[index] = recipe
-	c.JSON(http.StatusOK, recipe)
+	// 9) Decode the result
+	doc := bson.M{}
+	_ = result.Decode(&doc)
+	c.JSON(http.StatusOK, gin.H{
+		"message": doc,
+	})
 }
 
 // swagger:operation DELETE /recipes/{id} recipes DeleteRecipeHandler
@@ -154,25 +220,21 @@ func UpdateRecipeHandler(c *gin.Context) {
 //   description: Recipe Not found
 func DeleteRecipeHandler(c *gin.Context) {
 	id := c.Param("id")
-
-	index := -1
-	for i := 0; i < len(recipes); i++ {
-		if recipes[i].ID == id {
-			index = i
-		}
+	collection := client.Database("recipes").Collection("recipes")
+	filter := bson.M{
+		"id": id,
 	}
-
-	if index == -1 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Recipe not found",
+	result := collection.FindOneAndDelete(context.TODO(), filter)
+	if err := result.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
 		})
 		return
 	}
-
-	recipes = append(recipes[:index], recipes[index+1:]...)
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("%s recipe deleted", id),
+	c.JSON(200, gin.H{
+		"message": "Recipe deleted successfully",
 	})
+
 }
 
 // swagger:operation GET /recipes/search recipes SearchRecipeHandler
